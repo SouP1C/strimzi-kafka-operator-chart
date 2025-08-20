@@ -1,0 +1,210 @@
+global:
+  image:
+    pullSecrets: <some_pull_secret>
+  tolerations:
+    - key: <some_key>
+      operator: Equal
+      value: <some_key>
+      effect: NoSchedule
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          preference:
+            matchExpressions:
+              - key: project
+                operator: In
+                values:
+                  - <some_product_name>
+  schema_registry:
+    name: my-schema-registry
+    namespace: kafka
+    strimzi_version: v1beta2
+    listener: tls
+    security_protocol: SSL
+    comp_level: forward
+    registryImage: confluentinc/cp-schema-registry
+    registryImageTag: 7.5.0
+    serviceType: ClusterIP
+  kafka:
+    kafkaUser: kafka-connect-user
+    secondary_kafkaUser: kafka-connect-user-mm2
+    Mirrormaker2_User: mirrormaker2-user
+    secondary_Mirrormaker2_User: mirrormaker2-user-mm2
+    kafka_ns: kafka
+    secondary_kafka_ns: kafka-mm2
+    kafka_cluster_name: my-kafka-cluster
+    secondary_kafka_cluster_name: my-kafka-cluster-mm2
+    internalbootstrapServers: my-kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093
+    secondary_internalbootstrapServers: my-kafka-cluster-mm2-kafka-bootstrap.kafka-mm2.svc.cluster.local:9093
+    logger:
+      level: INFO
+  mirrormaker2:
+    name: my-mirror-maker-2
+    mirrormaker2_namespace: kafka
+    version: 3.9.0
+  connect:
+    base_image: <some_acr>.azurecr.io/kafka-connect-custom:1.1.1
+    name: primary-connect
+    secondary_name: secondary-connect
+    namespace: kafka
+    secondary_namespace: kafka-mm2
+    logger:
+      level: DEBUG
+    build:
+      output:
+        image: <some_acr>.azurecr.io/<some_product_name>-kafka-connect-repo/<some_product_name>-connect-kafka:test-mark
+        pushSecret: <some_pull_secret>
+    config:
+      groupid: connect-fixed-namespace
+    plugins:
+      artifacts:
+        - type: jar
+          url: "https://repo1.maven.org/maven2/io/netty/netty-resolver-dns/4.1.93.Final/netty-resolver-dns-4.1.93.Final.jar"
+
+# used to create <some_pull_secret> secret.
+# might use this later to also replicate the CR's.
+usedNamespaces:
+  - kafka
+  - kafka-mm2
+
+
+# TODO:
+# add a seggregator for kinds of users: microservice/customer/connect/MM2/schema-registry
+# added user_type parameter.
+kafkaUsers:
+  - name: kafka-connect-user
+    kafka_cluster: my-kafka-cluster
+    authentication: tls
+    namespace: kafka
+    user_type: connect
+
+kafkaTopics:
+  # topics for "my-kafka-cluster"
+  # topic.type can be external/shared in the future i might be asked to add more.
+  # Mirrormaker2 topics
+  - name: "source-cluster.offsets.sync"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: internal
+    tenantId: random
+  - name: "source-cluster.heartbeats"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: internal
+    tenantId: random
+  - name: "source-cluster.checkpoints.internal"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: internal
+    tenantId: random
+  - name: "mirrormaker2-cluster-offsets"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: internal
+    tenantId: random
+  # topics for "my-kafka-cluster".
+  - name: "continue-flow-topic"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: external
+    tenantId: random
+  - name: "upload-account-data"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: external
+    tenantId: random
+  - name: "upload-account-audit"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: external
+    tenantId: random
+  - name: "interface-audit-topic"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: external
+    tenantId: random
+  - name: "audit-topic"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: external
+    tenantId: random
+  - name: "configs"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: external
+    tenantId: random
+  - name: "offsets"
+    kafka_cluster: "my-kafka-cluster"
+    type: external
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    tenantId: random
+  - name: "status"
+    kafka_cluster: "my-kafka-cluster"
+    kafka_namespace: kafka
+    client_namespace: <some_namespace>
+    type: external
+    tenantId: random
+
+  # Kafka MirrorMaker2 should be able to re-create the topics onto the target cluster.
+  # # topics for "my-kafka-cluster-mm2"
+  # - name: "continue-flow-topic"
+  #   kafka_cluster: "my-kafka-cluster-mm2"
+  #   kafka_namespace: kafka-mm2
+    # client_namespace: <some_namespace>
+  #   type: external
+  #   tenantId: random
+  # - name: "upload-account-data"
+  #   kafka_cluster: "my-kafka-cluster-mm2"
+  #   kafka_namespace: kafka-mm2
+    # client_namespace: <some_namespace>
+  #   type: external
+  #   tenantId: random
+  # - name: "upload-account-audit"
+  #   kafka_cluster: "my-kafka-cluster-mm2"
+  #   kafka_namespace: kafka-mm2
+    # client_namespace: <some_namespace>
+  #   type: external
+  #   tenantId: random
+  # - name: "interface-audit-topic"
+  #   kafka_cluster: "my-kafka-cluster-mm2"
+  #   kafka_namespace: kafka-mm2
+    # client_namespace: <some_namespace>
+  #   type: external
+  #   tenantId: random
+  # - name: "audit-topic"
+  #   kafka_cluster: "my-kafka-cluster-mm2"
+  #   kafka_namespace: kafka-mm2
+    # client_namespace: <some_namespace>
+  #   type: external
+  #   tenantId: random
+  # #internal topics
+  # - name: "configs"
+  #   kafka_cluster: "my-kafka-cluster-mm2"
+  #   kafka_namespace: kafka-mm2
+    # client_namespace: <some_namespace>
+  #   type: external
+  #   tenantId: random
+  # - name: "offsets"
+  #   kafka_cluster: "my-kafka-cluster-mm2"
+  #   kafka_namespace: kafka-mm2
+    # client_namespace: <some_namespace>
+  #   type: external
+  #   tenantId: random
+  # - name: "status"
+  #   kafka_cluster: "my-kafka-cluster-mm2"
+  #   kafka_namespace: kafka-mm2
+    # client_namespace: <some_namespace>
+  #   type: external
+  #   tenantId: random

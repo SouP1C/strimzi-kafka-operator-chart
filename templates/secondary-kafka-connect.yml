@@ -1,0 +1,59 @@
+{{- $KafkaOperator := lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "kafkas.kafka.strimzi.io" -}}
+{{- if $KafkaOperator }}
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnect
+metadata:
+  annotations:
+    strimzi.io/use-connector-resources: 'true'
+  name: {{ $.Values.global.connect.secondary_name }}
+  namespace: {{ $.Values.global.connect.secondary_namespace }}
+spec:
+  image: {{ $.Values.global.connect.base_image }}
+  logging:
+    type: inline
+    loggers:
+      connect.root.logger.level: {{ $.Values.global.connect.logger.level }}
+  tls:
+    trustedCertificates:
+      - certificate: ca.crt
+        secretName: {{ $.Values.global.kafka.secondary_kafka_cluster_name}}-cluster-ca-cert
+  authentication:
+    type: tls
+    certificateAndKey:
+      secretName: {{ $.Values.global.kafka.secondary_kafkaUser }}
+      certificate: user.crt
+      key: user.key
+  bootstrapServers: {{ $.Values.global.kafka.secondary_internalbootstrapServers }}
+  template:
+    pod:
+      imagePullSecrets:
+        - name: {{ $.Values.global.connect.build.output.pushSecret }}
+      # Uncomment the following section to tune JVM memory settings for Kafka Connect pods
+      # env:
+      # - name: KAFKA_HEAP_OPTS
+      #   value: '-Xms512M -Xmx2G'
+  config:
+    auto.register.schemas: true
+    # kafka connect sees an error claiming: "org.apache.kafka.common.errors.UnsupportedVersionException: The node does not support GET_TELEMETRY_SUBSCRIPTIONS"
+    enable.metrics.push: false
+    config.providers: file
+    config.providers.file.class: org.apache.kafka.common.config.provider.FileConfigProvider
+    config.storage.topic: {{ $.Values.global.connect.config.groupid }}-configs
+    offset.storage.topic: {{ $.Values.global.connect.config.groupid }}-offsets
+    status.storage.topic: {{ $.Values.global.connect.config.groupid }}-status
+    group.id: {{ $.Values.global.connect.config.groupid }}
+  replicas: 1
+  version: 3.8.0
+  build:
+    output:
+      image: {{ $.Values.global.connect.build.output.image }}
+      pushSecret: {{ $.Values.global.connect.build.output.pushSecret }}
+      type: docker
+    plugins:
+      - artifacts:
+          {{- range .Values.global.connect.plugins.artifacts }}
+          - type: "{{ .type }}"
+            url: "{{ .url }}"
+          {{- end }}
+        name: my-kafka-tojdbc-connector1
+{{- end }}

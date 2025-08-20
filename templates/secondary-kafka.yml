@@ -1,0 +1,126 @@
+{{- $KafkaOperator := lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "kafkas.kafka.strimzi.io" -}}
+{{- if $KafkaOperator }}
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: {{ $.Values.global.kafka.secondary_kafka_cluster_name }}
+  namespace: {{ $.Values.global.kafka.secondary_kafka_ns }}
+spec:
+  # configuration of internal topic/user operators.
+  entityOperator:
+    topicOperator:
+      reconciliationIntervalMs: 60
+      logging:
+        loggers:
+          rootLogger.level: {{ $.Values.global.kafka.logger.level }}
+        type: inline
+      watchedNamespace: kafka-mm2
+      # watchedNamespace: kafka-dev
+    # <some_product>e might not use kafka users.
+    userOperator:
+      logging:
+        loggers:
+          rootLogger.level: {{ $.Values.global.kafka.logger.level }}
+        type: inline
+    #   reconciliationIntervalSeconds: 60
+    #   this one might work and not the one above.
+    #   reconciliationIntervalMs: 60
+    #   watchedNamespace: kafka-dev
+  kafka:
+    config:
+      # these 2 were added for the lolz..
+      # authorizer.class.name: kafka.security.auth.SimpleAclAuthorizer
+      allow.everyone.if.no.acl.found: false
+      auto.create.topics.enable: "true"
+      
+      default.replication.factor: 3
+      inter.broker.protocol.version: '3.8'
+      log.cleaner.dedupe.buffer.size: 2097152
+      log.message.format.version: '3.8'
+      min.insync.replicas: 3
+      offsets.topic.replication.factor: 3
+      transaction.state.log.min.isr: 3
+      transaction.state.log.replication.factor: 3
+    # <some_product>e might use metrics?
+    # metricsConfig:
+    #   type: jmxPrometheusExporter
+    #   valueFrom:
+    #     configMapKeyRef:
+    #       key: kafka-metrics-config.yml
+    #       name: paytogo-kafka-monitoring-configmap
+    resources:
+      limits:
+        cpu: 3
+        memory: 8Gi
+      requests:
+        cpu: 1
+        memory: 2Gi
+    # version 3.6 is not supported by kafka operator version .45.0
+    version: 3.8.0
+    authorization:
+      type: simple
+    template:
+      pod:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: project
+                      operator: In
+                      values:
+                        - <some_product>E
+        tolerations:
+          - effect: NoSchedule
+            key: <some_key>
+            operator: Equal
+            value: LaserPro
+    storage:
+      class: default
+      deleteClaim: true
+      size: 10Gi
+      type: persistent-claim
+    replicas: 3
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+        authentication:
+          type: tls
+      - name: external
+        port: 9094
+        type: ingress
+        tls: true
+        authentication:
+          type: tls
+        configuration:
+          class: nginx
+          bootstrap:
+            host: bootstrap-kafka-secondary.dev<some_DNS_ends_with .io>
+          brokers:
+            - broker: 0
+              host: broker-0-secondary.kafka.dev<some_DNS_ends_with .io>
+            - broker: 1
+              host: broker-1-secondary.kafka.dev<some_DNS_ends_with .io>
+            - broker: 2
+              host: broker-2-secondary.kafka.dev<some_DNS_ends_with .io>
+  zookeeper:
+    replicas: 3
+    storage:
+      class: default
+      deleteClaim: false
+      size: 10Gi
+      type: persistent-claim
+    # might use laterrr
+    # metricsConfig:
+    #   type: jmxPrometheusExporter
+    #   valueFrom:
+    #     configMapKeyRef:
+    #       key: zookeeper-metrics-config.yml
+    #       name: paytogo-kafka-monitoring-configmap
+{{- end }}

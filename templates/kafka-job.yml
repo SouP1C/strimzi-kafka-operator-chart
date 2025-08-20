@@ -1,0 +1,125 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "kafka-job"
+  namespace: {{ $.Values.global.kafka.kafka_ns }}
+spec:
+  selector: {}
+  template:
+    metadata:
+      name: "kafka-job-{{ .Release.Namespace }}"
+    spec:
+      serviceAccountName: strimzi-copy-sa
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: {{ .Values.global.image.pullSecrets }}
+      {{- if $.Values.global.tolerations }}
+      tolerations:
+        {{- tpl (toYaml $.Values.global.tolerations) $| nindent 8 }}
+      {{- end }}
+      {{- if $.Values.global.affinity }}
+      affinity:
+        {{- tpl (toYaml $.Values.global.affinity) $| nindent 8 }}
+      {{- end }}
+      containers:
+        - name: "kafka-job-{{ .Release.Namespace }}"
+          # image: "registry.access.redhat.com/ubi8/openjdk-11:latest"
+          image: "bitnami/kubectl:latest"
+          resources:
+            requests:
+              cpu: 1
+              memory: 1Gi
+            limits:
+              cpu: 1
+              memory: 1Gi
+            # command: |
+              #This job is to move users between namespaces.
+              #move kafkaUser 1 to 2nd namespace.
+              #might have to move 2 users for mm2 as well.
+          command:
+          - /bin/sh
+          - -c
+          - |
+            set -e
+            target_ns="{{ .Values.global.kafka.kafka_ns }}"
+            echo "Syncing kafkaUser secrets to target namespace: $target_ns"
+            RELEASE_NAME="{{ .Release.Name }}"
+            RELEASE_NAMESPACE="{{ .Release.Namespace }}"
+
+            {{- range .Values.kafkaUsers }}
+            SECRET_NAME="{{ .name }}"
+            SRC_NS="{{ .namespace }}"
+
+            if [ "$SRC_NS" = "$target_ns" ]; then
+              echo "Skipping secret $SECRET_NAME in the same namespace $SRC_NS"
+            else
+              until kubectl get secret "$SECRET_NAME" -n "$SRC_NS" >/dev/null 2>&1; do
+                echo "Waiting for secret $SECRET_NAME in $SRC_NS to exist"
+                sleep 5
+              done
+              CA_CRT=$(kubectl get secret "$SECRET_NAME" -n "$SRC_NS" -o jsonpath='{.data.ca\.crt}')
+              USER_CRT=$(kubectl get secret "$SECRET_NAME" -n "$SRC_NS" -o jsonpath='{.data.user\.crt}')
+              USER_KEY=$(kubectl get secret "$SECRET_NAME" -n "$SRC_NS" -o jsonpath='{.data.user\.key}')
+              USER_P12=$(kubectl get secret "$SECRET_NAME" -n "$SRC_NS" -o jsonpath='{.data.user\.p12}')
+              USER_PASSWORD=$(kubectl get secret "$SECRET_NAME" -n "$SRC_NS" -o jsonpath='{.data.user\.password}')
+
+              # Decode to files:
+              echo "$CA_CRT" | base64 -d > /tmp/ca.crt
+              echo "$USER_CRT" | base64 -d > /tmp/user.crt
+              echo "$USER_KEY" | base64 -d > /tmp/user.key
+              echo "$USER_P12" | base64 -d > /tmp/user.p12
+              echo "$USER_PASSWORD" | base64 -d > /tmp/user.password
+              
+              # Create a new secret in the target namespace
+              kubectl create secret generic "$SECRET_NAME" \
+                --from-file=/tmp/ca.crt \
+                --from-file=/tmp/user.crt \
+                --from-file=/tmp/user.key \
+                --from-file=/tmp/user.p12 \
+                --from-file=/tmp/user.password \
+                -n "$target_ns" \
+                --dry-run=client -o yaml | \
+                yq eval "
+                .metadata.annotations.\"kubernetes.io/managed-by\" = \"Helm\" |
+                .metadata.annotations.\"helm.sh/release-name\" = \"${RELEASE_NAME}\" |
+                .metadata.annotations.\"helm.sh/release-namespace\" = \"${RELEASE_NAMESPACE}\"
+                " - | kubectl apply -f -
+
+                echo "$SECRET_NAME copied to $target_ns"
+            fi
+            {{- end }}
+            
+            echo "Secret sync completed."
+
+            CA_SECRET="{{ .Values.global.kafka.secondary_kafka_cluster_name }}-cluster-ca-cert"
+            SRC_NS="{{ .Values.global.kafka.secondary_kafka_ns }}"
+            echo "Copying CA secret $CA_SECRET to target namespace: $target_ns"
+            until kubectl get secret "$CA_SECRET" -n "$SRC_NS" >/dev/null 2>&1; do
+              echo "Waiting for secret $CA_SECRET in $SRC_NS to exist"
+              sleep 5
+            done
+
+            CA_CRT=$(kubectl get secret "$CA_SECRET" -n "$SRC_NS" -o jsonpath='{.data.ca\.crt}')
+            CA_P12=$(kubectl get secret "$CA_SECRET" -n "$SRC_NS" -o jsonpath='{.data.ca\.p12}')
+            CA_PASSWORD=$(kubectl get secret "$CA_SECRET" -n "$SRC_NS" -o jsonpath='{.data.ca\.password}')
+
+            echo "$CA_CRT" | base64 -d > /tmp/$CA_SECRET_ca.crt
+            echo "$CA_P12" | base64 -d > /tmp/$CA_SECRET_ca.p12
+            echo "$CA_PASSWORD" | base64 -d > /tmp/$CA_SECRET_ca.password
+
+            kubectl create secret generic "$CA_SECRET" \
+              --from-file=ca.crt=/tmp/$CA_SECRET_ca.crt \
+              --from-file=ca.p12=/tmp/$CA_SECRET_ca.p12 \
+              --from-file=ca.password=/tmp/$CA_SECRET_ca.password \
+              -n "$target_ns" \
+              --dry-run=client -o yaml | \
+              yq eval "
+              .metadata.labels.\"kubernetes.io/managed-by\" = \"Helm\" |
+              .metadata.labels.\"helm.sh/release-name\" = \"${RELEASE_NAME}\" |
+              .metadata.labels.\"helm.sh/release-namespace\" = \"${RELEASE_NAMESPACE}\"
+              " - | kubectl apply -f -
+
+            echo "$CA_SECRET copied to $target_ns"
+
+      restartPolicy: Never
+  backoffLimit: 1

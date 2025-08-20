@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: strimzi-copy-rolebinding
+  namespace: {{ .Values.global.kafka.kafka_ns }}
+subjects:
+- kind: ServiceAccount
+  name: strimzi-copy-sa
+  namespace: {{ $.Values.global.kafka.kafka_ns }}
+roleRef:
+  kind: ClusterRole
+  name: strimzi-copy-role
+  # apiGroup: rbac.authorization.k8s.io
